@@ -1,0 +1,258 @@
+/* App layout: full width, main content centered */
+.app-layout {
+  width: 100%;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 1rem 2rem;
+}
+
+.app-layout main {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+/* Top nav for authenticated pages */
+.top-nav {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto 1.5rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+.top-nav .brand {
+  font-weight: 600;
+  font-size: 1.125rem;
+  color: #1a1a1a;
+}
+.top-nav .nav-links {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.top-nav .nav-links a {
+  padding: 0.375rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.9375rem;
+}
+.top-nav .nav-links a:hover {
+  background-color: #f3f4f6;
+  text-decoration: none;
+}
+
+/* Card container for page content */
+.page-card {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  border: 1px solid #e5e7eb;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+/* Auth pages: centered card */
+.auth-layout {
+  width: 100%;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+.auth-page {
+  width: 100%;
+  max-width: 400px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e5e7eb;
+  padding: 2rem;
+}
+.auth-page h1 {
+  margin-top: 0;
+  margin-bottom: 1.5rem;
+  text-align: center;
+}
+.auth-page form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.auth-page input {
+  margin: 0;
+}
+.auth-page p {
+  margin: 1rem 0 0;
+  text-align: center;
+  font-size: 0.9375rem;
+  color: #6b7280;
+}
+
+/* Dashboard */
+.dashboard .welcome {
+  color: #6b7280;
+  margin-bottom: 1.5rem;
+}
+.dashboard .nav-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 1rem;
+}
+.dashboard .nav-cards a {
+  display: block;
+  padding: 1rem;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  font-weight: 500;
+  text-align: center;
+  transition: background 0.2s, border-color 0.2s;
+}
+.dashboard .nav-cards a:hover {
+  background: #f3f4f6;
+  border-color: #d1d5db;
+  text-decoration: none;
+}
+
+/* Wallet */
+.wallet-page .back-link {
+  display: inline-block;
+  margin-bottom: 1rem;
+  font-size: 0.9375rem;
+}
+.wallet-balance {
+  display: flex;
+  gap: 2rem;
+  margin: 1rem 0;
+  padding: 1rem;
+  background: #f9fafb;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+}
+.wallet-balance p {
+  margin: 0;
+  font-size: 1rem;
+}
+.wallet-page .deposit-btn {
+  margin-bottom: 1.5rem;
+}
+.tx-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.tx-list li {
+  padding: 0.75rem 0;
+  border-bottom: 1px solid #f3f4f6;
+  font-size: 0.9375rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+.tx-list li:last-child {
+  border-bottom: none;
+}
+
+/* Withdrawal */
+.withdrawal-page form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 320px;
+  margin-bottom: 1.5rem;
+}
+.withdrawal-page ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.withdrawal-page ul li {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #f3f4f6;
+  font-size: 0.9375rem;
+}
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  z-index: 1000;
+}
+.modal {
+  background: #fff;
+  padding: 1.5rem;
+  border-radius: 12px;
+  min-width: 320px;
+  max-width: 100%;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+}
+.modal h3 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.25rem;
+}
+.modal-hint {
+  font-size: 0.875rem;
+  color: #6b7280;
+  margin: 0 0 1rem 0;
+}
+.modal form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.modal-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.modal-actions button[type="submit"] {
+  flex: 1;
+  min-width: 120px;
+}
+
+.error {
+  color: #dc2626;
+  font-size: 0.875rem;
+  margin: 0;
+}
+
+/* Tables inside page-card (admin and others) */
+.page-card table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.5rem;
+}
+.page-card th,
+.page-card td {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  border-bottom: 1px solid #e5e7eb;
+}
+.page-card th {
+  background: #f9fafb;
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+.page-card tr:last-child td {
+  border-bottom: none;
+}
+
+.loading {
+  text-align: center;
+  padding: 3rem 2rem;
+  color: #6b7280;
+  margin: 0;
+}
