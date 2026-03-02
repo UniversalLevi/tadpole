@@ -2,13 +2,16 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { User } from '../models/index.js';
 import { getWallet, getTransactions, updateBalance } from '../wallet/wallet.service.js';
+import { getBetsByUserId } from '../bet/bet.service.js';
 import {
   listAllWithdrawals,
   approveWithdrawal,
   rejectWithdrawal,
 } from '../withdrawal/withdrawal.service.js';
-import { getMongoSession } from '../db/mongo.js';
+import { getMongoSession, runTransaction } from '../db/mongo.js';
 import { logWithContext } from '../logs/index.js';
+import { auditLog } from '../lib/audit.js';
+import { getSystemConfig, updateSystemConfig } from '../models/SystemConfig.js';
 
 const adjustmentSchema = z.object({
   body: z.object({
@@ -68,6 +71,18 @@ router.get('/users/:userId/transactions', async (req: Request, res: Response) =>
   }
 });
 
+router.get('/users/:userId/bets', async (req: Request, res: Response) => {
+  const { userId } = req.params;
+  const page = Math.max(1, parseInt(String(req.query.page), 10) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit), 10) || 50));
+  try {
+    const result = await getBetsByUserId(userId, page, limit);
+    return res.json(result);
+  } catch {
+    return res.status(500).json({ error: 'Failed to get bet history' });
+  }
+});
+
 router.patch('/users/:userId/freeze', async (req: Request, res: Response) => {
   const adminId = req.userId!;
   const { userId } = req.params;
@@ -85,6 +100,12 @@ router.patch('/users/:userId/freeze', async (req: Request, res: Response) => {
       userId,
       requestId: req.requestId,
     });
+    auditLog('admin_freeze', {
+      userId,
+      metadata: { adminId, freeze },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+    });
     return res.json({ userId, isFrozen: user.isFrozen });
   } catch {
     return res.status(500).json({ error: 'Failed to update user' });
@@ -100,7 +121,7 @@ router.post('/wallet/adjustment', async (req: Request, res: Response) => {
   const { userId, amount, reason } = parsed.data.body;
   const session = await getMongoSession();
   try {
-    await session.withTransaction(async () => {
+    await runTransaction(session, async () => {
       await updateBalance(userId, {
         type: 'admin_adjustment',
         amount,
@@ -114,6 +135,12 @@ router.post('/wallet/adjustment', async (req: Request, res: Response) => {
       amount,
       reason,
       requestId: req.requestId,
+    });
+    auditLog('admin_adjustment', {
+      userId,
+      metadata: { adminId, amount, reason },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
     });
     return res.json({ ok: true });
   } catch (e) {
@@ -154,6 +181,29 @@ router.post('/withdrawals/:id/reject', async (req: Request, res: Response) => {
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Reject failed';
     return res.status(400).json({ error: msg });
+  }
+});
+
+router.get('/settings', async (_req: Request, res: Response) => {
+  try {
+    const config = await getSystemConfig();
+    return res.json(config);
+  } catch {
+    return res.status(500).json({ error: 'Failed to get settings' });
+  }
+});
+
+router.patch('/settings', async (req: Request, res: Response) => {
+  const body = req.body as { bettingPaused?: boolean; withdrawalsPaused?: boolean; newRoundsPaused?: boolean };
+  try {
+    const config = await updateSystemConfig({
+      ...(typeof body.bettingPaused === 'boolean' && { bettingPaused: body.bettingPaused }),
+      ...(typeof body.withdrawalsPaused === 'boolean' && { withdrawalsPaused: body.withdrawalsPaused }),
+      ...(typeof body.newRoundsPaused === 'boolean' && { newRoundsPaused: body.newRoundsPaused }),
+    });
+    return res.json(config);
+  } catch {
+    return res.status(500).json({ error: 'Failed to update settings' });
   }
 });
 

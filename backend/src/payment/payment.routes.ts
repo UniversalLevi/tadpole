@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
+import { depositRateLimiter } from '../middleware/rateLimit.js';
 import { createTestDeposit, handleWebhookPayload } from './payment.service.js';
 
 const testDepositSchema = z.object({
@@ -11,7 +12,7 @@ const testDepositSchema = z.object({
 const router = Router();
 
 /** Test-only: add amount to wallet without Razorpay. For development/testing. */
-router.post('/test-deposit', async (req: Request, res: Response) => {
+router.post('/test-deposit', depositRateLimiter, async (req: Request, res: Response) => {
   const userId = req.userId;
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
   const parsed = testDepositSchema.safeParse({ body: req.body });

@@ -2,10 +2,12 @@ import { Router, Request, Response } from 'express';
 import { register, login, refresh, logout } from './auth.service.js';
 import { registerSchema, loginSchema, refreshSchema, logoutSchema } from './auth.validation.js';
 import { logWithContext } from '../logs/index.js';
+import { auditLog } from '../lib/audit.js';
+import { loginRateLimiter, registerRateLimiter } from '../middleware/rateLimit.js';
 
 const router = Router();
 
-router.post('/register', async (req: Request, res: Response) => {
+router.post('/register', registerRateLimiter, async (req: Request, res: Response) => {
   try {
     const parsed = registerSchema.safeParse({ body: req.body });
     if (!parsed.success) {
@@ -14,6 +16,7 @@ router.post('/register', async (req: Request, res: Response) => {
     const { email, password } = parsed.data.body;
     const result = await register(email, password);
     logWithContext('info', 'User registered', { requestId: req.requestId, userId: result.userId });
+    auditLog('register', { userId: result.userId, ipAddress: req.ip, userAgent: req.get('user-agent') });
     return res.status(201).json(result);
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Registration failed';
@@ -25,7 +28,7 @@ router.post('/register', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/login', async (req: Request, res: Response) => {
+router.post('/login', loginRateLimiter, async (req: Request, res: Response) => {
   try {
     const parsed = loginSchema.safeParse({ body: req.body });
     if (!parsed.success) {
@@ -34,6 +37,7 @@ router.post('/login', async (req: Request, res: Response) => {
     const { email, password } = parsed.data.body;
     const result = await login(email, password);
     logWithContext('info', 'User logged in', { requestId: req.requestId, userId: result.user.id });
+    auditLog('login', { userId: result.user.id, ipAddress: req.ip, userAgent: req.get('user-agent') });
     return res.json(result);
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Login failed';

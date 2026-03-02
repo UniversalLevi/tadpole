@@ -3,9 +3,10 @@ import crypto from 'node:crypto';
 import mongoose from 'mongoose';
 import { Payment } from '../models/index.js';
 import { config } from '../config/index.js';
-import { getMongoSession } from '../db/mongo.js';
+import { getMongoSession, runTransaction } from '../db/mongo.js';
 import { updateBalance } from '../wallet/wallet.service.js';
 import { logWithContext } from '../logs/index.js';
+import { auditLog } from '../lib/audit.js';
 
 // Razorpay commented out for testing – use test-deposit endpoint instead
 // let razorpay: Razorpay | null = null;
@@ -61,7 +62,7 @@ export async function createTestDeposit(userId: string, amountINR: number): Prom
   if (amountINR < 1) throw new Error('Minimum amount is 1 INR');
   const session = await getMongoSession();
   try {
-    await session.withTransaction(async () => {
+    await runTransaction(session, async () => {
       await updateBalance(userId, {
         type: 'deposit',
         amount: amountINR,
@@ -119,7 +120,7 @@ export async function handleWebhookPayload(
 
   const session = await getMongoSession();
   try {
-    await session.withTransaction(async () => {
+    await runTransaction(session, async () => {
       const payment = await Payment.findOne({ razorpayOrderId }).session(session);
       if (!payment) {
         logWithContext('warn', 'Payment webhook unknown order', { requestId, razorpayOrderId });
@@ -153,6 +154,10 @@ export async function handleWebhookPayload(
         userId: payment.userId.toString(),
         razorpayPaymentId,
         amount,
+      });
+      auditLog('deposit_credited', {
+        userId: payment.userId.toString(),
+        metadata: { amount, razorpayPaymentId },
       });
     });
   } finally {

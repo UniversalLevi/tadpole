@@ -6,10 +6,13 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "clean-mongo": "tsx scripts/clean-mongo.ts",
+    "create-admin": "tsx scripts/create-admin.ts"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",
+    "socket.io": "^4.7.2",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",

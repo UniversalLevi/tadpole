@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { Button } from '../components/ui/Button';
+import { Input } from '../components/ui/Input';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -21,39 +23,56 @@ export default function Login() {
       const msg = err && typeof err === 'object' && 'response' in err
         ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
         : 'Login failed';
-      setError(msg || 'Login failed');
+      setError(String(msg) || 'Login failed');
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div className="auth-layout">
-      <div className="auth-page">
-        <h1>Log in</h1>
-        <form onSubmit={handleSubmit}>
-          {error && <p className="error">{error}</p>}
-          <input
-            type="email"
-            placeholder="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
-          <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-          <button type="submit" disabled={loading} className="primary">
-            {loading ? 'Logging in...' : 'Log in'}
-          </button>
-        </form>
-        <p>
-          Don&apos;t have an account? <Link to="/register">Register</Link>
-        </p>
+    <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-12">
+      <div className="card w-full max-w-md">
+        <div className="card-body">
+          <div className="mb-6 text-center">
+            <Link to="/" className="text-2xl font-bold text-teal-600">Tadpole</Link>
+            <h1 className="mt-4 text-xl font-semibold text-slate-900">Log in</h1>
+            <p className="mt-1 text-sm text-slate-500">Enter your credentials to continue</p>
+          </div>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {error && (
+              <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+                {error}
+              </p>
+            )}
+            <Input
+              label="Email"
+              type="email"
+              placeholder="you@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              autoComplete="email"
+            />
+            <Input
+              label="Password"
+              type="password"
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              autoComplete="current-password"
+            />
+            <Button type="submit" variant="primary" className="w-full" loading={loading}>
+              Log in
+            </Button>
+          </form>
+          <p className="mt-6 text-center text-sm text-slate-600">
+            Don&apos;t have an account?{' '}
+            <Link to="/register" className="font-medium text-teal-600 hover:text-teal-700">
+              Register
+            </Link>
+          </p>
+        </div>
       </div>
     </div>
   );

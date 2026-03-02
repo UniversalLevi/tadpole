@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import { Wallet, WalletTransaction } from '../models/index.js';
 import type { WalletTransactionType } from '../models/index.js';
-import { getMongoSession } from '../db/mongo.js';
+import { getMongoSession, runTransaction } from '../db/mongo.js';
 import { logWithContext } from '../logs/index.js';
 
 export async function createWalletIfMissing(
@@ -34,7 +34,7 @@ export async function getWallet(userId: string) {
   if (!wallet) {
     const session = await getMongoSession();
     try {
-      await session.withTransaction(async () => {
+      await runTransaction(session, async () => {
         await createWalletIfMissing(new mongoose.Types.ObjectId(userId), session);
       });
       wallet = await Wallet.findOne({ userId });
@@ -130,4 +130,98 @@ export async function updateBalance(
   });
 
   return { balanceAfter };
+}
+
+/**
+ * Lock funds for a bet. availableBalance -= amount, lockedBalance += amount.
+ * Must be called within an existing session.
+ */
+export async function lockForBet(
+  userId: string,
+  amount: number,
+  referenceId: string | undefined,
+  session: mongoose.mongo.ClientSession
+): Promise<void> {
+  const uid = new mongoose.Types.ObjectId(userId);
+  const opts = { session };
+  let w = await Wallet.findOne({ userId: uid }, null, opts);
+  if (!w) {
+    await createWalletIfMissing(uid, session);
+    w = await Wallet.findOne({ userId: uid }, null, opts);
+    if (!w) throw new Error('Wallet not found');
+  }
+  if (w.availableBalance < amount) {
+    throw new Error('Insufficient balance');
+  }
+  const availableBefore = w.availableBalance;
+  const availableAfter = availableBefore - amount;
+  await WalletTransaction.create(
+    [
+      {
+        userId: uid,
+        type: 'bet_lock',
+        amount: -amount,
+        balanceBefore: availableBefore,
+        balanceAfter: availableAfter,
+        status: 'completed',
+        referenceId,
+      },
+    ],
+    opts
+  );
+  await Wallet.updateOne(
+    { userId: uid },
+    {
+      $set: { availableBalance: availableAfter },
+      $inc: { lockedBalance: amount },
+    },
+    opts
+  );
+  logWithContext('info', 'Wallet lock for bet', { userId, amount, referenceId });
+}
+
+/**
+ * Settle a bet: unlock locked amount and optionally credit payout.
+ * lockedBalance -= betAmount, availableBalance += payoutAmount.
+ * Must be called within an existing session.
+ */
+export async function settleBet(
+  userId: string,
+  betAmount: number,
+  payoutAmount: number,
+  referenceId: string | undefined,
+  session: mongoose.mongo.ClientSession
+): Promise<void> {
+  const uid = new mongoose.Types.ObjectId(userId);
+  const opts = { session };
+  const w = await Wallet.findOne({ userId: uid }, null, opts);
+  if (!w) throw new Error('Wallet not found');
+  if (w.lockedBalance < betAmount) {
+    throw new Error('Insufficient locked balance');
+  }
+  const availableBefore = w.availableBalance;
+  const availableAfter = availableBefore + payoutAmount;
+  const type = payoutAmount > 0 ? 'bet_win' : 'bet_lose';
+  await WalletTransaction.create(
+    [
+      {
+        userId: uid,
+        type,
+        amount: payoutAmount,
+        balanceBefore: availableBefore,
+        balanceAfter: availableAfter,
+        status: 'completed',
+        referenceId,
+      },
+    ],
+    opts
+  );
+  await Wallet.updateOne(
+    { userId: uid },
+    {
+      $inc: { lockedBalance: -betAmount, availableBalance: payoutAmount },
+    },
+    opts
+  );
+  logWithContext('info', 'Bet settled', { userId, betAmount, payoutAmount, referenceId });
 }

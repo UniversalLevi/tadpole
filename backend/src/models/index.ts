@@ -5,3 +5,8 @@ export { WalletTransaction } from './WalletTransaction.js';
 export type { WalletTransactionType, WalletTransactionStatus } from './WalletTransaction.js';
 export { Payment } from './Payment.js';
 export { WithdrawalRequest } from './WithdrawalRequest.js';
+export { Round } from './Round.js';
+export type { RoundStatus } from './Round.js';
+export { Bet } from './Bet.js';
+export type { BetStatus } from './Bet.js';
+export { IdempotencyKey } from './IdempotencyKey.js';

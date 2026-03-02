@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
+import { config } from '../config/index.js';
 import {
   createWithdrawalRequest,
   getMyWithdrawals,
@@ -12,6 +13,14 @@ const requestSchema = z.object({
 });
 
 const router = Router();
+
+router.get('/limits', (_req: Request, res: Response) => {
+  return res.json({
+    minWithdrawalAmount: config.minWithdrawalAmount,
+    withdrawalCooldownMs: config.withdrawalCooldownMs,
+    maxWithdrawalsPerDay: config.maxWithdrawalsPerDay,
+  });
+});
 
 router.post('/request', async (req: Request, res: Response) => {
   const userId = req.userId;

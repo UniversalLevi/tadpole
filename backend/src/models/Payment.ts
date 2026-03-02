@@ -13,6 +13,6 @@ const paymentSchema = new mongoose.Schema(
 );
 
 paymentSchema.index({ razorpayOrderId: 1 });
-paymentSchema.index({ razorpayPaymentId: 1 });
+paymentSchema.index({ razorpayPaymentId: 1 }, { unique: true, sparse: true });
 
 export const Payment = mongoose.model('Payment', paymentSchema);
