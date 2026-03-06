@@ -20,6 +20,7 @@ const AdminWithdrawals = lazy(() => import('./pages/admin/Withdrawals'));
 const AdminBonuses = lazy(() => import('./pages/admin/Bonuses'));
 const AdminGrowth = lazy(() => import('./pages/admin/Growth'));
 const AdminSettings = lazy(() => import('./pages/admin/Settings'));
+const AdminRisk = lazy(() => import('./pages/admin/Risk'));
 
 function PageFallback() {
   return (
@@ -60,6 +61,7 @@ function App() {
                 <Route index element={<AdminUsers />} />
                 <Route path="users/:userId" element={<UserDetail />} />
                 <Route path="withdrawals" element={<AdminWithdrawals />} />
+                <Route path="risk" element={<AdminRisk />} />
                 <Route path="bonuses" element={<AdminBonuses />} />
                 <Route path="growth" element={<AdminGrowth />} />
                 <Route path="settings" element={<AdminSettings />} />

@@ -1,8 +1,13 @@
 import mongoose from 'mongoose';
 import { config } from '../config/index.js';
 
+/** Use with read-only queries to prefer secondaries when using a replica set. */
+export const readPreferenceSecondaryPreferred = 'secondaryPreferred' as const;
+
 export async function connectMongo(): Promise<void> {
-  await mongoose.connect(config.mongodbUri);
+  await mongoose.connect(config.mongodbUri, {
+    maxPoolSize: config.mongodbMaxPoolSize,
+  });
 }
 
 export function getMongoSession() {

@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import { User, Round, Bet } from '../models/index.js';
 import { config } from '../config/index.js';
 import { getSystemConfig } from '../models/SystemConfig.js';
-import { getMongoSession, runTransaction } from '../db/mongo.js';
+import { getMongoSession, runTransaction, readPreferenceSecondaryPreferred } from '../db/mongo.js';
 import { lockForBet } from '../wallet/wallet.service.js';
 import { getCurrentRound } from '../round/round.service.js';
 import { logWithContext } from '../logs/index.js';
@@ -76,11 +76,12 @@ export async function placeBet(
 export async function getBetsByUserId(userId: string, page: number = 1, limit: number = 50) {
   const skip = (page - 1) * limit;
   const bets = await Bet.find({ userId })
+    .read(readPreferenceSecondaryPreferred)
     .populate('roundId', 'roundNumber status result settledAt')
     .sort({ createdAt: -1 })
     .skip(skip)
     .limit(limit)
     .lean();
-  const total = await Bet.countDocuments({ userId });
+  const total = await Bet.countDocuments({ userId }).read(readPreferenceSecondaryPreferred);
   return { items: bets, total, page, limit };
 }

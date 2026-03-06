@@ -1,6 +1,7 @@
+import mongoose from 'mongoose';
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
-import { User, Bet, WalletTransaction, Bonus } from '../models/index.js';
+import { User, Bet, WalletTransaction, Bonus, FraudFlag, WithdrawalRequest, ReconciliationRun } from '../models/index.js';
 import { AuditLog } from '../models/AuditLog.js';
 import { config } from '../config/index.js';
 import { getWallet, getTransactions, updateBalance } from '../wallet/wallet.service.js';
@@ -369,6 +370,96 @@ router.get('/metrics', async (_req: Request, res: Response) => {
   } catch (e) {
     logWithContext('error', 'Admin metrics failed', { error: e instanceof Error ? e.message : String(e) });
     return res.status(500).json({ error: 'Failed to get metrics' });
+  }
+});
+
+const sevenDaysAgoForRisk = () => new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+router.get('/risk/overview', async (_req: Request, res: Response) => {
+  try {
+    const threshold = config.riskScoreThresholdBlock;
+    const last7d = sevenDaysAgoForRisk();
+    const [
+      highRiskUsers,
+      pendingCount,
+      processingCount,
+      recentFraudFlags,
+      failedWithdrawals,
+      depositVolume24h,
+      lastReconciliation,
+    ] = await Promise.all([
+      User.find({ riskScore: { $gte: threshold } })
+        .select('_id email riskScore riskScoreUpdatedAt withdrawalsPausedByRisk')
+        .sort({ riskScore: -1 })
+        .limit(50)
+        .lean(),
+      WithdrawalRequest.countDocuments({ status: 'pending' }),
+      WithdrawalRequest.countDocuments({ status: 'processing' }),
+      FraudFlag.find()
+        .sort({ createdAt: -1 })
+        .limit(50)
+        .populate('userId', 'email')
+        .lean(),
+      WithdrawalRequest.find({ status: 'failed' })
+        .sort({ processedAt: -1 })
+        .limit(50)
+        .populate('userId', 'email')
+        .lean(),
+      WalletTransaction.aggregate<{ total: number }>([
+        { $match: { type: 'deposit', status: 'completed', createdAt: { $gte: oneDayAgo() } } },
+        { $group: { _id: null, total: { $sum: '$amount' } } },
+      ]).then((r) => r[0]?.total ?? 0),
+      ReconciliationRun.findOne().sort({ runAt: -1 }).select('runAt status summary').lean(),
+    ]);
+
+    const depositTrends = await WalletTransaction.aggregate<{ _id: string; total: number }>([
+      { $match: { type: 'deposit', status: 'completed', createdAt: { $gte: sevenDaysAgo() } } },
+      { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, total: { $sum: '$amount' } } },
+      { $sort: { _id: 1 } },
+    ]);
+
+    return res.json({
+      highRiskUsers: highRiskUsers.map((u) => ({
+        userId: (u._id as mongoose.Types.ObjectId).toString(),
+        email: u.email,
+        riskScore: (u as { riskScore?: number }).riskScore ?? 0,
+        riskScoreUpdatedAt: (u as { riskScoreUpdatedAt?: Date }).riskScoreUpdatedAt,
+        withdrawalsPausedByRisk: (u as { withdrawalsPausedByRisk?: boolean }).withdrawalsPausedByRisk,
+      })),
+      withdrawalQueue: { pending: pendingCount, processing: processingCount },
+      fraudAlerts: recentFraudFlags.map((f) => ({
+        _id: (f._id as mongoose.Types.ObjectId).toString(),
+        userId: (f.userId as { _id?: mongoose.Types.ObjectId; email?: string })?._id?.toString(),
+        email: (f.userId as { email?: string })?.email,
+        flagType: f.flagType,
+        severity: f.severity,
+        metadata: f.metadata,
+        createdAt: f.createdAt,
+      })),
+      failedPayouts: failedWithdrawals.map((w) => ({
+        _id: (w._id as mongoose.Types.ObjectId).toString(),
+        userId: (w.userId as { _id?: mongoose.Types.ObjectId; email?: string })?._id?.toString(),
+        email: (w.userId as { email?: string })?.email,
+        amount: w.amount,
+        failureReason: (w as { failureReason?: string }).failureReason,
+        attemptCount: (w as { attemptCount?: number }).attemptCount,
+        processedAt: (w as { processedAt?: Date }).processedAt,
+      })),
+      depositTrends: {
+        volume24h: depositVolume24h,
+        last7Days: depositTrends.reduce((acc, d) => ({ ...acc, [d._id]: d.total }), {} as Record<string, number>),
+      },
+      lastReconciliation: lastReconciliation
+        ? {
+            runAt: (lastReconciliation as { runAt?: Date }).runAt,
+            status: (lastReconciliation as { status?: string }).status,
+            summary: (lastReconciliation as { summary?: unknown }).summary,
+          }
+        : null,
+    });
+  } catch (e) {
+    logWithContext('error', 'Admin risk overview failed', { error: e instanceof Error ? e.message : String(e) });
+    return res.status(500).json({ error: 'Failed to get risk overview' });
   }
 });
 

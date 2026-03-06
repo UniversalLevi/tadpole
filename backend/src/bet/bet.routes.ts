@@ -1,8 +1,10 @@
 import mongoose from 'mongoose';
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
+import { config } from '../config/index.js';
 import { IdempotencyKey } from '../models/index.js';
 import { placeBet } from './bet.service.js';
+import { addBetJob } from '../queue/bet.queue.js';
 
 const IDEMPOTENCY_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -40,6 +42,21 @@ router.post('/', async (req: Request, res: Response) => {
   }
 
   try {
+    if (config.useBetQueue) {
+      const jobId = await addBetJob({ gameId: 'prediction', userId, roundId, prediction, amount });
+      if (!jobId) return res.status(503).json({ error: 'Bet queue unavailable' });
+      if (idempotencyKey) {
+        const response = { status: 'queued' as const, jobId };
+        await IdempotencyKey.create({
+          key: idempotencyKey,
+          userId: new mongoose.Types.ObjectId(userId),
+          response,
+          expiresAt: new Date(Date.now() + IDEMPOTENCY_TTL_MS),
+        }).catch(() => {});
+        return res.status(202).json(response);
+      }
+      return res.status(202).json({ status: 'queued', jobId });
+    }
     const result = await placeBet(userId, roundId, prediction, amount);
     if (idempotencyKey) {
       await IdempotencyKey.create({

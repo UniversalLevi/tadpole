@@ -44,6 +44,8 @@ async function clean() {
     'referrals',
     'dailystats',
     'growthconfigs',
+    'fraudflags',
+    'reconciliationruns',
   ];
 
   console.log('Cleaning Tadpole collections...');

@@ -2,7 +2,9 @@ import mongoose from 'mongoose';
 import { AviatorBet, AviatorRound } from '../../models/index.js';
 import { generateServerSeed, hashServerSeed, computeCrashPoint } from '../../game/provablyFair.js';
 import { getMongoSession, runTransaction } from '../../db/mongo.js';
-import { settleBet } from '../../wallet/wallet.service.js';
+import { getWallet, settleBet } from '../../wallet/wallet.service.js';
+import { emitWalletUpdate } from '../../engine/emitters.js';
+import { addSettlementJob } from '../../queue/settlement.queue.js';
 import { logWithContext } from '../../logs/index.js';
 import type { GameEngine } from '../../engine/types.js';
 
@@ -206,10 +208,12 @@ async function crashRound(): Promise<void> {
 
   // Settle remaining active bets as lost (no payout)
   const session = await getMongoSession();
+  const affectedUserIds: string[] = [];
   try {
     await runTransaction(session, async () => {
       const active = await AviatorBet.find({ roundId: round._id, status: 'active' }).session(session);
       for (const bet of active) {
+        affectedUserIds.push(bet.userId.toString());
         await AviatorBet.updateOne({ _id: bet._id, status: 'active' }, { $set: { status: 'lost', payout: 0 } }, { session });
         await settleBet(bet.userId.toString(), bet.betAmount, 0, bet._id.toString(), session);
       }
@@ -218,6 +222,7 @@ async function crashRound(): Promise<void> {
     await session.endSession();
   }
   activeBets.clear();
+  addSettlementJob(roundId, 'aviator', affectedUserIds);
 
   // Gap then next countdown
   resetTimers();
@@ -247,6 +252,8 @@ async function internalCashout(userId: string, betId: string): Promise<void> {
     await session.endSession();
   }
   activeBets.delete(betId);
+  const w = await getWallet(userId);
+  if (w) emitWalletUpdate(userId, { availableBalance: w.availableBalance, lockedBalance: w.lockedBalance });
 }
 
 async function startCountdown(): Promise<void> {

@@ -21,6 +21,8 @@ import { bonusRoutes } from './bonus/index.js';
 import { initSocket } from './socket/index.js';
 import { recoverRoundOnStartup, startAviatorEngine, startRoundScheduler } from './scheduler/roundScheduler.js';
 import { aviatorRoutes } from './games/aviator/index.js';
+import { recordRequest, getMetrics, getContentType } from './metrics/index.js';
+import { getCacheRedis } from './cache/index.js';
 
 const app = express();
 
@@ -36,6 +38,11 @@ app.use(cors({ origin: config.frontendOrigin, credentials: true }));
 app.use(helmet());
 app.use(requestId);
 app.use(requestLogger);
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => recordRequest(req, res.statusCode, Date.now() - start));
+  next();
+});
 
 // Webhook must receive raw body for signature verification
 app.post('/payment/webhook', express.raw({ type: 'application/json' }), webhookRoute);
@@ -45,11 +52,34 @@ app.use(express.json());
 app.use(generalRateLimiter);
 
 app.get('/health', async (_req, res) => {
+  const health: { ok: boolean; mongo?: string; redis?: string } = { ok: true };
   try {
     await mongoose.connection.db?.admin().ping();
-    res.json({ ok: true, mongo: 'connected' });
+    health.mongo = 'connected';
   } catch {
-    res.status(503).json({ ok: false, mongo: 'disconnected' });
+    health.ok = false;
+    health.mongo = 'disconnected';
+  }
+  const redis = getCacheRedis();
+  if (redis) {
+    try {
+      await redis.ping();
+      health.redis = 'connected';
+    } catch {
+      health.ok = false;
+      health.redis = 'disconnected';
+    }
+  }
+  if (!health.ok) res.status(503);
+  res.json(health);
+});
+
+app.get('/metrics', async (_req, res) => {
+  try {
+    res.set('Content-Type', getContentType());
+    res.end(await getMetrics());
+  } catch (e) {
+    res.status(500).end('');
   }
 });
 

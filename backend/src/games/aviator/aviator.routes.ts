@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
-import { cashoutAviatorBet, getAviatorPublicState, listLastCrashes, placeAviatorBet } from './aviator.service.js';
+import { cashoutAviatorBet, getAviatorPublicState, getRoundPlayers, listLastCrashes, placeAviatorBet } from './aviator.service.js';
 
 const router = Router();
 
@@ -20,6 +20,15 @@ router.get('/last-crashes', async (req: Request, res: Response) => {
     return res.json({ items });
   } catch {
     return res.status(500).json({ error: 'Failed to list crashes' });
+  }
+});
+
+router.get('/players', async (_req: Request, res: Response) => {
+  try {
+    const data = await getRoundPlayers();
+    return res.json(data);
+  } catch {
+    return res.status(500).json({ error: 'Failed to get round players' });
   }
 });
 

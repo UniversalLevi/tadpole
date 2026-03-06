@@ -6,12 +6,33 @@ import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 
-type WithdrawalRow = { _id: string; amount: number; status: string; requestedAt: string };
+type WithdrawalRow = { _id: string; amount: number; status: string; requestedAt: string; method?: string };
 type Limits = { minWithdrawalAmount: number; withdrawalCooldownMs: number; maxWithdrawalsPerDay: number };
+
+function statusBadgeClass(status: string): string {
+  switch (status) {
+    case 'pending':
+      return 'bg-amber-100 text-amber-800';
+    case 'processing':
+      return 'bg-blue-100 text-blue-800';
+    case 'completed':
+      return 'bg-emerald-100 text-emerald-800';
+    case 'failed':
+      return 'bg-red-100 text-red-800';
+    case 'rejected':
+      return 'bg-slate-100 text-slate-700';
+    default:
+      return 'bg-slate-100 text-slate-700';
+  }
+}
 
 export default function Withdrawal() {
   const { user } = useAuth();
   const [amount, setAmount] = useState('');
+  const [method, setMethod] = useState<'upi' | 'bank'>('upi');
+  const [upiId, setUpiId] = useState('');
+  const [bankAccountRef, setBankAccountRef] = useState('');
+  const [bankIfsc, setBankIfsc] = useState('');
   const [list, setList] = useState<WithdrawalRow[]>([]);
   const [limits, setLimits] = useState<Limits | null>(null);
   const [error, setError] = useState('');
@@ -36,16 +57,33 @@ export default function Withdrawal() {
       setError(`Minimum withdrawal is ${min} INR`);
       return;
     }
+    if (method === 'upi') {
+      const vpa = upiId.trim();
+      if (!vpa || !/^[\w.-]+@[\w.-]+$/.test(vpa)) {
+        setError('Enter a valid UPI ID (e.g. name@bank)');
+        return;
+      }
+    } else {
+      if (!bankAccountRef.trim() || !bankIfsc.trim()) {
+        setError('Bank account number and IFSC are required');
+        return;
+      }
+    }
     setError('');
     setLoading(true);
     try {
-      await api.post('/withdrawal/request', { amount: num });
+      await api.post('/withdrawal/request', {
+        amount: num,
+        method,
+        ...(method === 'upi' ? { upiId: upiId.trim() } : { bankAccountRef: bankAccountRef.trim(), bankIfsc: bankIfsc.trim() }),
+      });
       setAmount('');
       load();
     } catch (err: unknown) {
-      const msg = err && typeof err === 'object' && 'response' in err
-        ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
-        : 'Request failed';
+      const msg =
+        err && typeof err === 'object' && 'response' in err
+          ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
+          : 'Request failed';
       setError(String(msg));
     } finally {
       setLoading(false);
@@ -81,6 +119,57 @@ export default function Withdrawal() {
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
           />
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">Withdrawal method</label>
+            <div className="flex gap-4">
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="method"
+                  checked={method === 'upi'}
+                  onChange={() => setMethod('upi')}
+                  className="h-4 w-4 border-slate-300 text-teal-600 focus:ring-teal-500"
+                />
+                <span className="text-sm text-slate-700">UPI</span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="method"
+                  checked={method === 'bank'}
+                  onChange={() => setMethod('bank')}
+                  className="h-4 w-4 border-slate-300 text-teal-600 focus:ring-teal-500"
+                />
+                <span className="text-sm text-slate-700">Bank</span>
+              </label>
+            </div>
+          </div>
+          {method === 'upi' ? (
+            <Input
+              label="UPI ID"
+              type="text"
+              placeholder="name@bank"
+              value={upiId}
+              onChange={(e) => setUpiId(e.target.value)}
+            />
+          ) : (
+            <>
+              <Input
+                label="Bank account number"
+                type="text"
+                placeholder="Account number"
+                value={bankAccountRef}
+                onChange={(e) => setBankAccountRef(e.target.value)}
+              />
+              <Input
+                label="IFSC"
+                type="text"
+                placeholder="e.g. HDFC0001234"
+                value={bankIfsc}
+                onChange={(e) => setBankIfsc(e.target.value)}
+              />
+            </>
+          )}
           <Button type="submit" variant="primary" loading={loading}>
             Request withdrawal
           </Button>
@@ -95,15 +184,7 @@ export default function Withdrawal() {
             {list.map((r) => (
               <li key={r._id} className="flex flex-wrap items-center justify-between gap-2 py-3 first:pt-0">
                 <span className="font-medium text-slate-700">₹{r.amount.toFixed(2)}</span>
-                <span
-                  className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                    r.status === 'pending'
-                      ? 'bg-amber-100 text-amber-800'
-                      : r.status === 'approved'
-                        ? 'bg-emerald-100 text-emerald-800'
-                        : 'bg-slate-100 text-slate-700'
-                  }`}
-                >
+                <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${statusBadgeClass(r.status)}`}>
                   {r.status}
                 </span>
                 <span className="w-full text-sm text-slate-500 sm:w-auto">

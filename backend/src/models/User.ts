@@ -15,6 +15,9 @@ const userSchema = new mongoose.Schema(
     totalWagered: { type: Number, default: 0 },
     vipLevel: { type: String, enum: ['bronze', 'silver', 'gold', 'platinum'], default: 'bronze' },
     lastCashbackAt: { type: Date },
+    riskScore: { type: Number, default: 0 },
+    riskScoreUpdatedAt: { type: Date },
+    withdrawalsPausedByRisk: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

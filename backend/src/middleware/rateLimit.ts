@@ -1,5 +1,6 @@
 import rateLimit from 'express-rate-limit';
 import { MongoStore } from './mongoStore.js';
+import { createRedisStoreIfAvailable } from './redisStore.js';
 
 const AUTH_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 const GENERAL_WINDOW_MS = 1 * 60 * 1000; // 1 minute
@@ -9,21 +10,18 @@ const BET_WINDOW_MS = 1000; // 1 second
 const DEPOSIT_WINDOW_MS = 1 * 60 * 1000; // 1 minute
 const WITHDRAW_WINDOW_MS = 1 * 60 * 1000; // 1 minute
 
-const authStore = new MongoStore({
-  prefix: 'rl:auth:',
-  windowMs: AUTH_WINDOW_MS,
-});
+function storeFor(prefix: string, windowMs: number) {
+  const redis = createRedisStoreIfAvailable({ prefix, windowMs });
+  return redis ?? new MongoStore({ prefix, windowMs });
+}
 
-const generalStore = new MongoStore({
-  prefix: 'rl:general:',
-  windowMs: GENERAL_WINDOW_MS,
-});
-
-const loginStore = new MongoStore({ prefix: 'rl:login:', windowMs: LOGIN_WINDOW_MS });
-const registerStore = new MongoStore({ prefix: 'rl:register:', windowMs: REGISTER_WINDOW_MS });
-const betStore = new MongoStore({ prefix: 'rl:bet:', windowMs: BET_WINDOW_MS });
-const depositStore = new MongoStore({ prefix: 'rl:deposit:', windowMs: DEPOSIT_WINDOW_MS });
-const withdrawStore = new MongoStore({ prefix: 'rl:withdraw:', windowMs: WITHDRAW_WINDOW_MS });
+const authStore = storeFor('rl:auth:', AUTH_WINDOW_MS);
+const generalStore = storeFor('rl:general:', GENERAL_WINDOW_MS);
+const loginStore = storeFor('rl:login:', LOGIN_WINDOW_MS);
+const registerStore = storeFor('rl:register:', REGISTER_WINDOW_MS);
+const betStore = storeFor('rl:bet:', BET_WINDOW_MS);
+const depositStore = storeFor('rl:deposit:', DEPOSIT_WINDOW_MS);
+const withdrawStore = storeFor('rl:withdraw:', WITHDRAW_WINDOW_MS);
 
 export const authRateLimiter = rateLimit({
   windowMs: AUTH_WINDOW_MS,

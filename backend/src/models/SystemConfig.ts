@@ -1,4 +1,6 @@
 import mongoose from 'mongoose';
+import { config } from '../config/index.js';
+import { cacheGet, cacheSet, cacheDel, CACHE_KEYS } from '../cache/index.js';
 
 const SYSTEM_CONFIG_ID = 'system';
 
@@ -14,11 +16,15 @@ const systemConfigSchema = new mongoose.Schema(
 
 export const SystemConfig = mongoose.model('SystemConfig', systemConfigSchema);
 
-export async function getSystemConfig(): Promise<{
+export type SystemConfigData = {
   bettingPaused: boolean;
   withdrawalsPaused: boolean;
   newRoundsPaused: boolean;
-}> {
+};
+
+export async function getSystemConfig(): Promise<SystemConfigData> {
+  const cached = await cacheGet<SystemConfigData>(CACHE_KEYS.systemConfig);
+  if (cached) return cached;
   let doc = await SystemConfig.findById(SYSTEM_CONFIG_ID).lean();
   if (!doc) {
     await SystemConfig.create({
@@ -29,26 +35,34 @@ export async function getSystemConfig(): Promise<{
     });
     doc = await SystemConfig.findById(SYSTEM_CONFIG_ID).lean();
   }
-  return {
+  const data: SystemConfigData = {
     bettingPaused: doc?.bettingPaused ?? false,
     withdrawalsPaused: doc?.withdrawalsPaused ?? false,
     newRoundsPaused: doc?.newRoundsPaused ?? false,
   };
+  await cacheSet(CACHE_KEYS.systemConfig, data, config.cacheTtlConfigMs);
+  return data;
 }
 
 export async function updateSystemConfig(updates: {
   bettingPaused?: boolean;
   withdrawalsPaused?: boolean;
   newRoundsPaused?: boolean;
-}): Promise<{ bettingPaused: boolean; withdrawalsPaused: boolean; newRoundsPaused: boolean }> {
+}): Promise<SystemConfigData> {
   const doc = await SystemConfig.findByIdAndUpdate(
     SYSTEM_CONFIG_ID,
     { $set: updates },
     { new: true, upsert: true }
   ).lean();
-  return {
+  const data: SystemConfigData = {
     bettingPaused: doc?.bettingPaused ?? false,
     withdrawalsPaused: doc?.withdrawalsPaused ?? false,
     newRoundsPaused: doc?.newRoundsPaused ?? false,
   };
+  await cacheSet(CACHE_KEYS.systemConfig, data, config.cacheTtlConfigMs);
+  return data;
+}
+
+export async function invalidateSystemConfigCache(): Promise<void> {
+  await cacheDel(CACHE_KEYS.systemConfig);
 }

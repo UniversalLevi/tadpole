@@ -3,7 +3,7 @@ import { Wallet, WalletTransaction, User, UserBonus } from '../models/index.js';
 import type { WalletTransactionType } from '../models/index.js';
 import { getGrowthConfig } from '../models/GrowthConfig.js';
 import { computeVipLevel } from '../lib/vip.js';
-import { getMongoSession, runTransaction } from '../db/mongo.js';
+import { getMongoSession, runTransaction, readPreferenceSecondaryPreferred } from '../db/mongo.js';
 import { logWithContext } from '../logs/index.js';
 
 export async function createWalletIfMissing(
@@ -32,7 +32,7 @@ function isReplicaSetRequiredError(e: unknown): boolean {
 }
 
 export async function getWallet(userId: string) {
-  let wallet = await Wallet.findOne({ userId });
+  let wallet = await Wallet.findOne({ userId }).read(readPreferenceSecondaryPreferred);
   if (!wallet) {
     const session = await getMongoSession();
     try {
@@ -61,8 +61,8 @@ export async function getTransactions(
 ) {
   const skip = (page - 1) * limit;
   const [items, total] = await Promise.all([
-    WalletTransaction.find({ userId }).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
-    WalletTransaction.countDocuments({ userId }),
+    WalletTransaction.find({ userId }).read(readPreferenceSecondaryPreferred).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+    WalletTransaction.countDocuments({ userId }).read(readPreferenceSecondaryPreferred),
   ]);
   return { items, total, page, limit };
 }
@@ -132,6 +132,37 @@ export async function updateBalance(
   });
 
   return { balanceAfter };
+}
+
+/**
+ * Appends a ledger entry without changing balance (e.g. withdrawal_complete after payout).
+ */
+export async function appendTransactionRecord(
+  userId: string,
+  type: WalletTransactionType,
+  amount: number,
+  referenceId: string | undefined,
+  session?: mongoose.mongo.ClientSession
+): Promise<void> {
+  const uid = new mongoose.Types.ObjectId(userId);
+  const opts = session ? { session } : {};
+  const w = await Wallet.findOne({ userId: uid }, null, opts);
+  if (!w) return;
+  const balance = w.availableBalance;
+  await WalletTransaction.create(
+    [
+      {
+        userId: uid,
+        type,
+        amount,
+        balanceBefore: balance,
+        balanceAfter: balance,
+        status: 'completed',
+        referenceId,
+      },
+    ],
+    opts
+  );
 }
 
 /**

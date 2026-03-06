@@ -1,0 +1,93 @@
+# Phase 8: Local multi-instance stack (API, Redis, Mongo, workers)
+# Run from repo root: docker compose up -d
+# Requires .env with MONGODB_URI, JWT_ACCESS_SECRET, JWT_REFRESH_SECRET at minimum.
+
+services:
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    environment:
+      PORT: 5000
+      NODE_ENV: production
+      MONGODB_URI: mongodb://mongo:27017/tadpole
+      REDIS_URL: redis://redis:6379
+      FRONTEND_ORIGIN: http://localhost:5173
+    env_file:
+      - .env
+    depends_on:
+      - mongo
+      - redis
+    restart: unless-stopped
+
+  api2:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "5001:5000"
+    environment:
+      PORT: 5000
+      NODE_ENV: production
+      MONGODB_URI: mongodb://mongo:27017/tadpole
+      REDIS_URL: redis://redis:6379
+      FRONTEND_ORIGIN: http://localhost:5173
+    env_file:
+      - .env
+    depends_on:
+      - mongo
+      - redis
+    restart: unless-stopped
+    profiles:
+      - scale
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    restart: unless-stopped
+
+  worker-withdrawal:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["node", "dist/workers/withdrawalWorker.js"]
+    environment:
+      NODE_ENV: production
+      MONGODB_URI: mongodb://mongo:27017/tadpole
+      REDIS_URL: redis://redis:6379
+    env_file:
+      - .env
+    depends_on:
+      - mongo
+      - redis
+    restart: unless-stopped
+
+  worker-settlement:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["node", "dist/workers/settlementWorker.js"]
+    environment:
+      NODE_ENV: production
+      MONGODB_URI: mongodb://mongo:27017/tadpole
+      REDIS_URL: redis://redis:6379
+    env_file:
+      - .env
+    depends_on:
+      - mongo
+      - redis
+    restart: unless-stopped
+
+volumes:
+  mongo_data: {}

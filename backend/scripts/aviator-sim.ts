@@ -57,8 +57,9 @@ async function waitForBetting(): Promise<void> {
 }
 
 async function main() {
-  const bots = Number(process.env.BOTS ?? 50);
-  console.log(`Starting aviator sim with ${bots} bots`);
+  const bots = Number(process.env.BOTS ?? 200);
+  const cashoutCount = Number(process.env.CASHOUTS ?? 50);
+  console.log(`Starting aviator sim with ${bots} bots, up to ${cashoutCount} cashouts`);
   await connectMongo();
 
   const userIds = await ensureBotUsers(bots);
@@ -67,14 +68,20 @@ async function main() {
   if (!s.roundId) throw new Error('No active round');
   console.log(`Betting round: #${s.roundNumber} (${s.roundId})`);
 
-  // Place bets
+  // Place up to 200 bets in parallel (all bots place one bet this round)
+  const toPlace = userIds.slice(0, 200);
   const placed = await Promise.all(
-    userIds.map((uid) =>
-      placeAviatorBet(uid, 100, Math.random() > 0.7 ? 2 + Math.random() * 2 : undefined).catch((e) => ({ betId: '', error: e }))
+    toPlace.map((uid) =>
+      placeAviatorBet(uid, 100, Math.random() > 0.7 ? 2 + Math.random() * 2 : undefined).catch((e: unknown) => ({ betId: '', error: e }))
     )
   );
-  const betIds = placed.filter((x: any) => x && typeof x === 'object' && 'betId' in x && x.betId).map((x: any) => x.betId as string);
-  console.log(`Placed ${betIds.length} bets`);
+  const betIdToUserId: Array<{ betId: string; userId: string }> = [];
+  placed.forEach((x, i) => {
+    if (x && typeof x === 'object' && 'betId' in x && typeof (x as { betId: string }).betId === 'string' && (x as { betId: string }).betId) {
+      betIdToUserId.push({ betId: (x as { betId: string }).betId, userId: toPlace[i]! });
+    }
+  });
+  console.log(`Placed ${betIdToUserId.length} bets`);
 
   // Wait for running and try cashouts
   let running = false;
@@ -88,12 +95,11 @@ async function main() {
   }
   if (!running) console.log('Did not observe running quickly; continuing');
 
-  // Randomly cash out some bets
-  const cashoutTargets = betIds.slice(0, Math.floor(betIds.length * 0.4));
+  // Burst of cashouts: take first N and run up to 50 parallel cashouts (with small stagger)
+  const cashoutTargets = betIdToUserId.slice(0, Math.min(cashoutCount, betIdToUserId.length));
   await Promise.all(
-    cashoutTargets.map(async (bid, i) => {
-      await new Promise((r) => setTimeout(r, Math.random() * 1500));
-      const uid = userIds[i % userIds.length];
+    cashoutTargets.map(async ({ betId: bid, userId: uid }) => {
+      await new Promise((r) => setTimeout(r, Math.random() * 800));
       try {
         await cashoutAviatorBet(uid, bid);
       } catch {
@@ -103,9 +109,12 @@ async function main() {
       try {
         await cashoutAviatorBet(uid, bid);
         console.error('Duplicate cashout unexpectedly succeeded', bid);
-      } catch {}
+      } catch {
+        // expected
+      }
     })
   );
+  console.log(`Attempted ${cashoutTargets.length} cashouts`);
 
   // Wait for crash
   for (let i = 0; i < 200; i++) {
@@ -118,9 +127,9 @@ async function main() {
   }
 
   // Late cashout should fail
-  if (betIds[0]) {
+  if (betIdToUserId[0]) {
     try {
-      await cashoutAviatorBet(userIds[0], betIds[0]);
+      await cashoutAviatorBet(betIdToUserId[0].userId, betIdToUserId[0].betId);
       console.error('Late cashout unexpectedly succeeded');
     } catch {
       console.log('Late cashout correctly rejected');

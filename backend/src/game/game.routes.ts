@@ -1,18 +1,13 @@
 import { Router, Request, Response } from 'express';
 import { Round, Bet } from '../models/index.js';
+import { readPreferenceSecondaryPreferred } from '../db/mongo.js';
 import { getSystemConfig } from '../models/SystemConfig.js';
 import { getGrowthConfig } from '../models/GrowthConfig.js';
 import { getCurrentRound } from '../round/round.service.js';
+import { cacheGet, cacheSet, CACHE_KEYS } from '../cache/index.js';
+import { config } from '../config/index.js';
 
 const router = Router();
-
-const LEADERBOARD_CACHE_TTL_MS = 60 * 1000;
-type LeaderboardCacheEntry = { data: { items: Array<{ userId: string; value: number; rank: number }> }; expiresAt: number };
-const leaderboardCache = new Map<string, LeaderboardCacheEntry>();
-
-function getLeaderboardCacheKey(period: string, metric: string): string {
-  return `lb_${period}_${metric}`;
-}
 
 router.get('/current-round', async (_req: Request, res: Response) => {
   try {
@@ -41,7 +36,7 @@ router.get('/current-round', async (_req: Request, res: Response) => {
 router.get('/rounds/:roundId', async (req: Request, res: Response) => {
   const { roundId } = req.params;
   try {
-    const round = await Round.findById(roundId).select('-__v').lean();
+    const round = await Round.findById(roundId).read(readPreferenceSecondaryPreferred).select('-__v').lean();
     if (!round) return res.status(404).json({ error: 'Round not found' });
     const payload = { ...round };
     if (round.status !== 'settled') {
@@ -57,6 +52,7 @@ router.get('/last-results', async (req: Request, res: Response) => {
   const limit = Math.min(20, Math.max(1, parseInt(String(req.query.limit), 10) || 10));
   try {
     const items = await Round.find({ status: 'settled' })
+      .read(readPreferenceSecondaryPreferred)
       .sort({ roundNumber: -1 })
       .limit(limit)
       .select('roundNumber result')
@@ -89,11 +85,9 @@ router.get('/leaderboard', async (req: Request, res: Response) => {
   if (!['volume', 'biggestWin', 'wagered'].includes(metric)) {
     return res.status(400).json({ error: 'Invalid metric. Use volume, biggestWin, or wagered.' });
   }
-  const cacheKey = getLeaderboardCacheKey(period, metric);
-  const cached = leaderboardCache.get(cacheKey);
-  if (cached && Date.now() < cached.expiresAt) {
-    return res.json(cached.data);
-  }
+  const cacheKey = CACHE_KEYS.leaderboard(period, metric);
+  const cached = await cacheGet<{ items: Array<{ userId: string; value: number; rank: number }> }>(cacheKey);
+  if (cached) return res.json(cached);
   const cutoff = period === 'day'
     ? new Date(Date.now() - 24 * 60 * 60 * 1000)
     : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -114,10 +108,7 @@ router.get('/leaderboard', async (req: Request, res: Response) => {
         rank: i + 1,
       })),
     };
-    leaderboardCache.set(cacheKey, {
-      data: result,
-      expiresAt: Date.now() + LEADERBOARD_CACHE_TTL_MS,
-    });
+    await cacheSet(cacheKey, result, config.cacheTtlLeaderboardMs);
     return res.json(result);
   } catch {
     return res.status(500).json({ error: 'Failed to get leaderboard' });
@@ -130,8 +121,8 @@ router.get('/rounds', async (req: Request, res: Response) => {
   const skip = (page - 1) * limit;
   try {
     const [items, total] = await Promise.all([
-      Round.find().sort({ roundNumber: -1 }).skip(skip).limit(limit).select('-serverSeed').lean(),
-      Round.countDocuments(),
+      Round.find().read(readPreferenceSecondaryPreferred).sort({ roundNumber: -1 }).skip(skip).limit(limit).select('-serverSeed').lean(),
+      Round.countDocuments().read(readPreferenceSecondaryPreferred),
     ]);
     return res.json({ items, total, page, limit });
   } catch {

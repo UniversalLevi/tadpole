@@ -10,6 +10,10 @@ import {
 const requestSchema = z.object({
   body: z.object({
     amount: z.number().positive(),
+    method: z.enum(['bank', 'upi']).default('upi'),
+    upiId: z.string().optional(),
+    bankAccountRef: z.string().optional(),
+    bankIfsc: z.string().optional(),
   }),
 });
 
@@ -30,9 +34,22 @@ router.post('/request', withdrawRateLimiter, async (req: Request, res: Response)
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.flatten().fieldErrors });
   }
-  const { amount } = parsed.data.body;
+  const { amount, method, upiId, bankAccountRef, bankIfsc } = parsed.data.body;
+  if (method === 'upi' && !upiId) {
+    return res.status(400).json({ error: 'upiId required for UPI withdrawal' });
+  }
+  if (method === 'bank' && (!bankAccountRef || !bankIfsc)) {
+    return res.status(400).json({ error: 'bankAccountRef and bankIfsc required for bank withdrawal' });
+  }
   try {
-    const requestId = await createWithdrawalRequest(userId, amount);
+    const requestId = await createWithdrawalRequest({
+      userId,
+      amount,
+      method,
+      upiId,
+      bankAccountRef,
+      bankIfsc,
+    });
     return res.status(201).json({ id: requestId, amount, status: 'pending' });
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Withdrawal request failed';

@@ -1,14 +1,29 @@
 import mongoose from 'mongoose';
 import { Round, Bet, DailyStats } from '../models/index.js';
+import { readPreferenceSecondaryPreferred } from '../db/mongo.js';
 import { config } from '../config/index.js';
 import { getMongoSession, runTransaction } from '../db/mongo.js';
 import { generateServerSeed, hashServerSeed, computeResult } from '../game/provablyFair.js';
 import { settleBet, recordWagerAndBonusProgress } from '../wallet/wallet.service.js';
 import { logWithContext } from '../logs/index.js';
+import { cacheGet, cacheSet, cacheDel, CACHE_KEYS } from '../cache/index.js';
 
 type RoundDoc = { _id: mongoose.Types.ObjectId; roundNumber: number; status: string; bettingClosesAt: Date; serverSeedHash: string; result?: number; serverSeed?: string; totalBetAmount: number };
 /** In-memory cache for the current round; cleared when round settles. Avoids hitting Mongo on every timer tick. */
 let currentRoundCache: { id: string; doc: RoundDoc } | null = null;
+
+function roundDocFromCached(c: { _id: string; roundNumber: number; status: string; bettingClosesAt: string; serverSeedHash: string; totalBetAmount: number; result?: number; serverSeed?: string }): RoundDoc {
+  return {
+    _id: new mongoose.Types.ObjectId(c._id),
+    roundNumber: c.roundNumber,
+    status: c.status,
+    bettingClosesAt: new Date(c.bettingClosesAt),
+    serverSeedHash: c.serverSeedHash,
+    totalBetAmount: c.totalBetAmount,
+    ...(c.result !== undefined && { result: c.result }),
+    ...(c.serverSeed !== undefined && { serverSeed: c.serverSeed }),
+  };
+}
 
 export function getCurrentRoundFromCache() {
   return currentRoundCache;
@@ -16,12 +31,32 @@ export function getCurrentRoundFromCache() {
 
 export function setCurrentRoundCache(round: RoundDoc | null) {
   currentRoundCache = round ? { id: round._id.toString(), doc: round } : null;
+  if (round) {
+    const payload = {
+      _id: round._id.toString(),
+      roundNumber: round.roundNumber,
+      status: round.status,
+      bettingClosesAt: round.bettingClosesAt.toISOString(),
+      serverSeedHash: round.serverSeedHash,
+      totalBetAmount: round.totalBetAmount,
+      ...(round.result !== undefined && { result: round.result }),
+      ...(round.serverSeed !== undefined && { serverSeed: round.serverSeed }),
+    };
+    cacheSet(CACHE_KEYS.roundPrediction, payload, config.cacheTtlRoundStateMs).catch(() => {});
+  } else {
+    cacheDel(CACHE_KEYS.roundPrediction).catch(() => {});
+  }
 }
 
 export async function getCurrentRound(): Promise<RoundDoc | null> {
   if (currentRoundCache) return currentRoundCache.doc;
+  const cached = await cacheGet<{ _id: string; roundNumber: number; status: string; bettingClosesAt: string; serverSeedHash: string; totalBetAmount: number; result?: number; serverSeed?: string }>(CACHE_KEYS.roundPrediction);
+  if (cached) return roundDocFromCached(cached);
   const start = Date.now();
-  const round = await Round.findOne({ status: { $in: ['betting', 'closed'] } }).sort({ roundNumber: -1 }).lean();
+  const round = await Round.findOne({ status: { $in: ['betting', 'closed'] } })
+    .sort({ roundNumber: -1 })
+    .read(readPreferenceSecondaryPreferred)
+    .lean();
   const durationMs = Date.now() - start;
   if (durationMs > config.slowQueryMs) {
     logWithContext('warn', 'Slow getCurrentRound (cache miss)', { durationMs });
@@ -29,6 +64,17 @@ export async function getCurrentRound(): Promise<RoundDoc | null> {
   if (round) {
     const doc = round as RoundDoc;
     currentRoundCache = { id: doc._id.toString(), doc };
+    const payload = {
+      _id: doc._id.toString(),
+      roundNumber: doc.roundNumber,
+      status: doc.status,
+      bettingClosesAt: doc.bettingClosesAt.toISOString(),
+      serverSeedHash: doc.serverSeedHash,
+      totalBetAmount: doc.totalBetAmount,
+      ...(doc.result !== undefined && { result: doc.result }),
+      ...(doc.serverSeed !== undefined && { serverSeed: doc.serverSeed }),
+    };
+    cacheSet(CACHE_KEYS.roundPrediction, payload, config.cacheTtlRoundStateMs).catch(() => {});
     return doc;
   }
   return null;

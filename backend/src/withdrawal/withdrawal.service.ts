@@ -1,68 +1,55 @@
 import mongoose from 'mongoose';
-import { User, WithdrawalRequest, UserBonus } from '../models/index.js';
-import { config } from '../config/index.js';
-import { getSystemConfig } from '../models/SystemConfig.js';
+import { WithdrawalRequest } from '../models/index.js';
 import { getMongoSession, runTransaction } from '../db/mongo.js';
 import { updateBalance } from '../wallet/wallet.service.js';
 import { logWithContext } from '../logs/index.js';
 import { auditLog } from '../lib/audit.js';
+import { runWithdrawalEligibilityChecks } from './withdrawal.eligibility.js';
+import { addWithdrawalJob } from '../queue/withdrawal.queue.js';
+import { flagDepositInstantWithdraw, checkSamePayoutDestination } from '../fraud/detectFraud.js';
 
 function isReplicaSetRequiredError(e: unknown): boolean {
   const msg = e instanceof Error ? e.message : String(e);
   return msg.includes('replica set') || msg.includes('Transaction numbers');
 }
 
-export async function createWithdrawalRequest(userId: string, amount: number) {
-  const sys = await getSystemConfig();
-  if (sys.withdrawalsPaused) throw new Error('Withdrawals are temporarily paused');
-  const user = await User.findById(userId);
-  if (!user) throw new Error('User not found');
-  if (user.isFrozen) throw new Error('Account is frozen');
-  if (amount < config.minWithdrawalAmount) {
-    throw new Error(`Minimum withdrawal is ${config.minWithdrawalAmount} INR`);
-  }
+export interface CreateWithdrawalParams {
+  userId: string;
+  amount: number;
+  method: 'bank' | 'upi';
+  upiId?: string;
+  bankAccountRef?: string;
+  bankIfsc?: string;
+}
 
-  const activeBonusWithUnmetWager = await UserBonus.findOne({
+export async function createWithdrawalRequest(
+  params: CreateWithdrawalParams
+): Promise<string> {
+  const { userId, amount, method, upiId, bankAccountRef, bankIfsc } = params;
+  const eligibility = await runWithdrawalEligibilityChecks(userId, amount);
+  if (!eligibility.allowed) {
+    if (eligibility.reasonCode === 'deposit_cooldown') {
+      flagDepositInstantWithdraw(userId).catch(() => {});
+    }
+    throw new Error(eligibility.reason ?? 'Withdrawal not allowed');
+  }
+  checkSamePayoutDestination(userId, upiId, bankAccountRef, bankIfsc).catch(() => {});
+
+  const payload = {
     userId: new mongoose.Types.ObjectId(userId),
-    status: 'active',
-    $expr: { $lt: ['$wagerCompleted', '$wagerRequired'] },
-  }).lean();
-  if (activeBonusWithUnmetWager) {
-    throw new Error('Complete bonus wagering before withdrawal.');
-  }
-
-  const now = Date.now();
-  const cooldownCutoff = new Date(now - config.withdrawalCooldownMs);
-  const dayCutoff = new Date(now - 24 * 60 * 60 * 1000);
-  const lastApproved = await WithdrawalRequest.findOne(
-    { userId, status: 'approved' }
-  ).sort({ processedAt: -1 }).select('processedAt').lean();
-  if (lastApproved?.processedAt && new Date(lastApproved.processedAt).getTime() > cooldownCutoff.getTime()) {
-    throw new Error('Withdrawal cooldown active. Try again later.');
-  }
-  const approvedToday = await WithdrawalRequest.countDocuments({
-    userId,
-    status: 'approved',
-    processedAt: { $gte: dayCutoff },
-  });
-  if (approvedToday >= config.maxWithdrawalsPerDay) {
-    throw new Error(`Maximum ${config.maxWithdrawalsPerDay} withdrawals per day reached.`);
-  }
+    amount,
+    method,
+    status: 'pending' as const,
+    ...(upiId && { upiId }),
+    ...(bankAccountRef && { bankAccountRef }),
+    ...(bankIfsc && { bankIfsc }),
+  };
 
   const session = await getMongoSession();
   let requestId: string;
   try {
     await runTransaction(session, async () => {
-      const wr = await WithdrawalRequest.create(
-        [
-          {
-            userId: new mongoose.Types.ObjectId(userId),
-            amount,
-            status: 'pending',
-          },
-        ],
-        { session }
-      );
+      const wr = await WithdrawalRequest.create([payload], { session });
       requestId = wr[0]._id.toString();
       await updateBalance(userId, {
         type: 'withdrawal_request',
@@ -71,24 +58,20 @@ export async function createWithdrawalRequest(userId: string, amount: number) {
         session,
       });
     });
-    auditLog('withdraw_request', { userId, metadata: { requestId: requestId!, amount } });
+    auditLog('withdraw_request', { userId, metadata: { requestId: requestId!, amount, method } });
+    addWithdrawalJob(requestId!).catch(() => {});
     return requestId!;
   } catch (e) {
     if (isReplicaSetRequiredError(e)) {
-      const wr = await WithdrawalRequest.create([
-        {
-          userId: new mongoose.Types.ObjectId(userId),
-          amount,
-          status: 'pending',
-        },
-      ]);
+      const wr = await WithdrawalRequest.create([payload]);
       requestId = wr[0]._id.toString();
       await updateBalance(userId, {
         type: 'withdrawal_request',
         amount: -amount,
         referenceId: requestId,
       });
-      auditLog('withdraw_request', { userId, metadata: { requestId, amount } });
+      auditLog('withdraw_request', { userId, metadata: { requestId, amount, method } });
+      addWithdrawalJob(requestId).catch(() => {});
       return requestId;
     }
     throw e;
@@ -131,14 +114,14 @@ export async function approveWithdrawal(
         { _id: wr._id },
         {
           $set: {
-            status: 'approved',
+            status: 'completed',
             processedAt: new Date(),
             processedBy: new mongoose.Types.ObjectId(adminUserId),
           },
         },
         { session }
       );
-      logWithContext('info', 'Withdrawal approved', {
+      logWithContext('info', 'Withdrawal approved (manual)', {
         withdrawalId,
         userId: wr.userId.toString(),
         amount: wr.amount,
@@ -160,13 +143,13 @@ export async function approveWithdrawal(
         { _id: wr._id },
         {
           $set: {
-            status: 'approved',
+            status: 'completed',
             processedAt: new Date(),
             processedBy: new mongoose.Types.ObjectId(adminUserId),
           },
         }
       );
-      logWithContext('info', 'Withdrawal approved', {
+      logWithContext('info', 'Withdrawal approved (manual)', {
         withdrawalId,
         userId: wr.userId.toString(),
         amount: wr.amount,

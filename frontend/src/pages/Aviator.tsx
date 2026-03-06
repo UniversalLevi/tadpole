@@ -18,6 +18,8 @@ type AviatorState = {
 
 type CrashItem = { roundNumber: number; crashPoint: number; crashedAt: string };
 
+type RoundPlayers = { activeCount: number; recentCashouts: Array<{ multiplier: number; payout: number }> };
+
 export default function Aviator() {
   const { user } = useAuth();
   const { connected, reconnecting, getSocket, walletBalance } = useSocket();
@@ -30,6 +32,7 @@ export default function Aviator() {
   const [cashing, setCashing] = useState(false);
   const [message, setMessage] = useState('');
   const [multiplierTick, setMultiplierTick] = useState(false);
+  const [roundPlayers, setRoundPlayers] = useState<RoundPlayers>({ activeCount: 0, recentCashouts: [] });
   const tickRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const multiplierText = useMemo(() => {
@@ -52,6 +55,21 @@ export default function Aviator() {
       load();
     }
   }, [connected]);
+
+  // Poll live players when round is betting or running
+  useEffect(() => {
+    const phase = engineState?.phase ?? 'idle';
+    if (phase !== 'betting' && phase !== 'running') {
+      setRoundPlayers({ activeCount: 0, recentCashouts: [] });
+      return;
+    }
+    const fetchPlayers = () => {
+      api.get<RoundPlayers>('/aviator/players').then((r) => setRoundPlayers(r.data)).catch(() => {});
+    };
+    fetchPlayers();
+    const interval = setInterval(fetchPlayers, 2000);
+    return () => clearInterval(interval);
+  }, [engineState?.phase, engineState?.roundId]);
 
   useEffect(() => {
     const socket = getSocket();
@@ -190,7 +208,24 @@ export default function Aviator() {
       <Card className="overflow-hidden">
         <div className="bg-gradient-to-b from-slate-50 to-white border-b border-slate-200 px-5 py-5 md:px-6">
           <p className="text-sm font-medium uppercase tracking-wide text-slate-500">Multiplier</p>
-          <div className="mt-2 flex items-center justify-center min-h-[5.5rem]">
+          <div className="mt-2 flex flex-col items-center justify-center min-h-[5.5rem] gap-3">
+            {phase === 'running' && (
+              <div className="relative w-full max-w-xs h-12 rounded-full bg-slate-200/80 overflow-hidden">
+                <div
+                  className="absolute inset-y-0 left-0 bg-gradient-to-r from-teal-500 to-emerald-500 rounded-full transition-all duration-75 ease-out"
+                  style={{ width: `${Math.min(100, ((engineState?.multiplier ?? 1) - 1) * 12.5)}%` }}
+                />
+                <div
+                  className="absolute top-1/2 -translate-y-1/2 transition-all duration-75 ease-out"
+                  style={{ left: `calc(${Math.min(100, ((engineState?.multiplier ?? 1) - 1) * 12.5)}% - 20px)` }}
+                  aria-hidden
+                >
+                  <svg viewBox="0 0 24 24" className="w-10 h-10 text-slate-800 drop-shadow-sm" fill="currentColor">
+                    <path d="M12 2L4 20h4l2-6h4l2 6h4L12 2zm0 4.5l1.5 4.5h-3l1.5-4.5z" />
+                  </svg>
+                </div>
+              </div>
+            )}
             <span
               className={`text-5xl md:text-7xl font-bold tabular-nums transition-transform duration-75 ${
                 phase === 'crashed' ? 'text-red-600' : 'text-teal-600'
@@ -254,6 +289,26 @@ export default function Aviator() {
           </div>
         </div>
       </Card>
+
+      {(phase === 'betting' || phase === 'running') && (
+        <Card className="mt-6" title="Live players">
+          <p className="text-sm text-slate-600">
+            <span className="font-semibold tabular-nums">{roundPlayers.activeCount}</span> player{roundPlayers.activeCount !== 1 ? 's' : ''} in
+          </p>
+          {roundPlayers.recentCashouts.length > 0 && (
+            <div className="mt-2">
+              <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Recent cashouts</p>
+              <ul className="mt-1 flex flex-wrap gap-2">
+                {roundPlayers.recentCashouts.map((c, i) => (
+                  <li key={i} className="rounded-lg bg-emerald-50 px-2.5 py-1.5 text-sm font-medium text-emerald-800 tabular-nums">
+                    {c.multiplier.toFixed(2)}x → ₹{c.payout.toFixed(2)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </Card>
+      )}
 
       {lastCrashes.length > 0 && (
         <div className="mt-6">

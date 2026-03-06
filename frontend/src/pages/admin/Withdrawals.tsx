@@ -74,7 +74,7 @@ export default function AdminWithdrawals() {
                   <td className="px-4 py-3 font-medium">₹{r.amount.toFixed(2)}</td>
                   <td className="px-4 py-3">
                     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                      r.status === 'pending' ? 'bg-amber-100 text-amber-800' : r.status === 'approved' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'
+                      r.status === 'pending' ? 'bg-amber-100 text-amber-800' : r.status === 'completed' ? 'bg-emerald-100 text-emerald-800' : r.status === 'processing' ? 'bg-blue-100 text-blue-800' : r.status === 'failed' ? 'bg-red-100 text-red-800' : 'bg-slate-100 text-slate-700'
                     }`}>{r.status}</span>
                   </td>
                   <td className="px-4 py-3 text-slate-600">{new Date(r.requestedAt).toLocaleString()}</td>

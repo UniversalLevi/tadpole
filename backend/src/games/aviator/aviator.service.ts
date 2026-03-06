@@ -5,8 +5,14 @@ import { getMongoSession, runTransaction } from '../../db/mongo.js';
 import { lockForBet } from '../../wallet/wallet.service.js';
 import { logWithContext } from '../../logs/index.js';
 import { cacheActiveBet, cashoutBet, getAviatorState, removeCachedBet } from './aviator.engine.js';
+import { cacheGet, cacheSet, CACHE_KEYS } from '../../cache/index.js';
 
-export async function getAviatorPublicState(): Promise<{
+export type RoundPlayersResponse = {
+  activeCount: number;
+  recentCashouts: Array<{ multiplier: number; payout: number }>;
+};
+
+export type AviatorPublicState = {
   phase: string;
   roundId: string | null;
   roundNumber: number;
@@ -14,10 +20,15 @@ export async function getAviatorPublicState(): Promise<{
   serverSeedHash: string | null;
   multiplier: number;
   crashed?: { crashPoint: number; serverSeed: string };
-}> {
+};
+
+export async function getAviatorPublicState(): Promise<AviatorPublicState> {
+  const cached = await cacheGet<AviatorPublicState>(CACHE_KEYS.roundAviator);
+  if (cached) return cached;
   const s = getAviatorState();
+  let result: AviatorPublicState;
   if (!s.roundId) {
-    return {
+    result = {
       phase: s.phase,
       roundId: null,
       roundNumber: 0,
@@ -25,10 +36,9 @@ export async function getAviatorPublicState(): Promise<{
       serverSeedHash: null,
       multiplier: 1,
     };
-  }
-  if (s.phase === 'crashed') {
+  } else if (s.phase === 'crashed') {
     const round = await AviatorRound.findById(s.roundId).select('crashPoint serverSeed').lean();
-    return {
+    result = {
       phase: s.phase,
       roundId: s.roundId,
       roundNumber: s.roundNumber,
@@ -37,14 +47,34 @@ export async function getAviatorPublicState(): Promise<{
       multiplier: s.currentMultiplier,
       crashed: round ? { crashPoint: round.crashPoint as number, serverSeed: round.serverSeed as string } : undefined,
     };
+  } else {
+    result = {
+      phase: s.phase,
+      roundId: s.roundId,
+      roundNumber: s.roundNumber,
+      bettingClosesAt: s.bettingClosesAt ? new Date(s.bettingClosesAt).toISOString() : null,
+      serverSeedHash: s.serverSeedHash,
+      multiplier: s.currentMultiplier,
+    };
   }
+  await cacheSet(CACHE_KEYS.roundAviator, result, config.cacheTtlRoundStateMs);
+  return result;
+}
+
+export async function getRoundPlayers(): Promise<RoundPlayersResponse> {
+  const s = getAviatorState();
+  if (!s.roundId) return { activeCount: 0, recentCashouts: [] };
+  const [activeCount, cashouts] = await Promise.all([
+    AviatorBet.countDocuments({ roundId: new mongoose.Types.ObjectId(s.roundId), status: 'active' }),
+    AviatorBet.find({ roundId: new mongoose.Types.ObjectId(s.roundId), status: 'cashed_out' })
+      .sort({ updatedAt: -1 })
+      .limit(15)
+      .select('cashoutMultiplier payout')
+      .lean(),
+  ]);
   return {
-    phase: s.phase,
-    roundId: s.roundId,
-    roundNumber: s.roundNumber,
-    bettingClosesAt: s.bettingClosesAt ? new Date(s.bettingClosesAt).toISOString() : null,
-    serverSeedHash: s.serverSeedHash,
-    multiplier: s.currentMultiplier,
+    activeCount,
+    recentCashouts: cashouts.map((b) => ({ multiplier: b.cashoutMultiplier as number, payout: b.payout as number })),
   };
 }
 

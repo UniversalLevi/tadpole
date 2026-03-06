@@ -9,7 +9,8 @@ import {
   setCurrentRoundCache,
 } from '../../round/round.service.js';
 import { logWithContext } from '../../logs/index.js';
-import { emitPredictionRoundStarted, emitPredictionRoundTimer, emitPredictionRoundClosed, emitPredictionRoundResult, emitWalletUpdate } from '../../engine/emitters.js';
+import { emitPredictionRoundStarted, emitPredictionRoundTimer, emitPredictionRoundClosed, emitPredictionRoundResult } from '../../engine/emitters.js';
+import { addSettlementJob } from '../../queue/settlement.queue.js';
 import type { GameEngine } from '../../engine/types.js';
 
 /** Restart recovery: close or settle any stuck prediction round. */
@@ -27,11 +28,7 @@ async function recoverPredictionOnStartup(): Promise<void> {
     if (result) {
       logWithContext('info', 'Recovery: settled stuck closed round', { roundId: round._id.toString() });
       emitPredictionRoundResult({ roundId: round._id.toString(), result: result.result, serverSeed: result.serverSeed });
-      const { getWallet } = await import('../../wallet/wallet.service.js');
-      for (const uid of result.affectedUserIds) {
-        const w = await getWallet(uid);
-        if (w) emitWalletUpdate(uid, { availableBalance: w.availableBalance, lockedBalance: w.lockedBalance });
-      }
+      addSettlementJob(round._id.toString(), 'prediction', result.affectedUserIds);
     }
   }
 }
@@ -86,11 +83,7 @@ function startPrediction(): void {
           if (result) {
             lastSettledAt = Date.now();
             emitPredictionRoundResult({ roundId, result: result.result, serverSeed: result.serverSeed });
-            const { getWallet } = await import('../../wallet/wallet.service.js');
-            for (const uid of result.affectedUserIds) {
-              const w = await getWallet(uid);
-              if (w) emitWalletUpdate(uid, { availableBalance: w.availableBalance, lockedBalance: w.lockedBalance });
-            }
+            addSettlementJob(roundId, 'prediction', result.affectedUserIds);
           }
           lastClosedRoundId = null;
         }
